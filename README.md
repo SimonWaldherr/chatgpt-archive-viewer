@@ -21,3 +21,8 @@ The Chat Archive Enhancer Tool enhances your downloaded ChatGPT chat archive wit
 3. **Save or Open Enhanced Archive**:
    - Click on `Save Edited File` to save the enhanced archive to your device.
    - Or click on `Open Edited File` to directly use the enhanced archive within the online-tool.
+
+## Example:
+
+- [this is a original example of an exported ChatGPT archive](https://simonwaldherr.github.io/chatgpt-archive-viewer/example/chat-original.html)
+- [this is a by this tool enhanced version of the above archive](https://simonwaldherr.github.io/chatgpt-archive-viewer/example/chat-enhanced.html)
