@@ -55,6 +55,7 @@
         function getConversationMessages(conversation) {
           var messages = [];
           var currentNode = conversation.current_node;
+
           while (currentNode != null) {
               var node = conversation.mapping[currentNode];
               if (
@@ -94,11 +95,31 @@
   
       function onload() {
         javascript: (function() {
+          var converter = new showdown.Converter({
+            'omitExtraWLInCodeBlocks': true,
+            'noHeaderId': false,
+            'parseImgDimensions': true,
+            'simplifiedAutoLink': true,
+            'literalMidWordUnderscores': true,
+            'strikethrough': true,
+            'tables': true,
+            'tablesHeaderId': false,
+            'ghCodeBlocks': true,
+            'tasklists': true,
+            'smoothLivePreview': true,
+            'prefixHeaderId': false,
+            'disableForced4SpacesIndentedSublists': false,
+            'ghCompatibleHeaderId': true,
+            'smartIndentationFix': false,
+            'headerLevelStart': 3
+          });
+          
           // HTML neu bauen
           var root = document.getElementById("root");
           root.innerHTML = '';
           for (var i = 0; i < jsonData.length; i++) {
             var conversation = jsonData[i];
+            //console.log(conversation);
             var messages = getConversationMessages(conversation);
             //console.log(messages);
             var div = document.createElement("div");
@@ -112,7 +133,8 @@
             for (var j = 0; j < messages.length; j++) {
               message = document.createElement("pre");
               message.className = "message";
-              message.innerHTML = `<div class="author">${messages[j].author} (${messages[j].date.toISOString().replace("T"," ").substr(0,19)})</div><div>${messages[j].text}</div>`;
+              message.innerHTML = `<div class="author">${messages[j].author} (${messages[j].date.toISOString().replace("T"," ").substr(0,19)})</div><div>${converter.makeHtml(messages[j].text)}</div>`;
+              
               div.appendChild(message);
             }
             root.appendChild(div);
@@ -382,5 +404,6 @@ const post = "Ci8qIHBvd2VyZWQgYnkgaHR0cHM6Ly9jaGF0Lm9wZW5haS5jb20vICovCgogICAgZn
             
         });
     </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/2.1.0/showdown.min.js" integrity="sha512-LhccdVNGe2QMEfI3x4DVV3ckMRe36TfydKss6mJpdHjNFiV07dFpS2xzeZedptKZrwxfICJpez09iNioiSZ3hA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </body>
 </html>
