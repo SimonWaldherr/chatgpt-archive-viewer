@@ -26,3 +26,7 @@ The Chat Archive Enhancer Tool enhances your downloaded ChatGPT chat archive wit
 
 - [this is a original example of an exported ChatGPT archive](https://simonwaldherr.github.io/chatgpt-archive-viewer/example/chat-original.html)
 - [this is a by this tool enhanced version of the above archive](https://simonwaldherr.github.io/chatgpt-archive-viewer/example/chat-enhanced.html)
+
+## Contributing:
+
+If you have any suggestions or improvements, feel free to open an issue or a pull request. Your feedback is highly appreciated!

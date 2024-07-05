@@ -113,6 +113,8 @@
             'smartIndentationFix': false,
             'headerLevelStart': 3
           });
+
+          var markdownEnabled = document.getElementById("markdown").checked;
           
           // HTML neu bauen
           var root = document.getElementById("root");
@@ -133,7 +135,25 @@
             for (var j = 0; j < messages.length; j++) {
               message = document.createElement("pre");
               message.className = "message";
-              message.innerHTML = `<div class="author">${messages[j].author} (${messages[j].date.toISOString().replace("T"," ").substr(0,19)})</div><div>${converter.makeHtml(messages[j].text)}</div>`;
+              
+              if (messages[j].author === "Custom user info") {
+                message.style.backgroundColor = "#f0f0f0";
+              }
+              // if message is from ChatGPT, add a class to style it differently
+              if (messages[j].author === "ChatGPT") {
+                message.classList.add("chatgpt-message");
+              }
+              // if message is from the user, add a class to style it differently
+              if (messages[j].author === "user") {
+                message.classList.add("user-message");
+              }
+              // if markdown is enabled, convert the message to HTML
+              if (markdownEnabled) {
+                message.innerHTML = `<div class="author">${messages[j].author} (${messages[j].date.toISOString().replace("T"," ").substr(0,19)})</div><div>${converter.makeHtml(messages[j].text)}</div>`;
+              } else {
+                message.innerHTML = `<div class="author">${messages[j].author} (${messages[j].date.toISOString().replace("T"," ").substr(0,19)})</div><div>${messages[j].text}</div>`;
+              }
+              //message.innerHTML = `<div class="author">${messages[j].author} (${messages[j].date.toISOString().replace("T"," ").substr(0,19)})</div><div>${converter.makeHtml(messages[j].text)}</div>`;
               
               div.appendChild(message);
             }
@@ -294,10 +314,22 @@
             <input type="file" id="file-input" accept=".html" required>
             <!--<button type="submit">Select</button>-->
         </form>
-        <textarea id="editor" rows="20" cols="80" style="display:none;"></textarea>
         <b id="status" style="display:none;">Loading Data</b>
-        <button id="download-button" style="display:none;">Save Edited File</button>
-        <button id="open-button" style="display:none;">Open Edited File</button>
+        <div id="controlPanelAfterUpload" style="display:none;">
+          <textarea id="editor" rows="20" cols="80" style="display: none;" ></textarea>
+        
+          <button id="download-button">Save Edited File</button>
+
+          <br><br><br>
+
+          <!-- Checkbox options to turn Markdown parsing on and off -->
+          <label for="markdown">Enable Markdown Parsing</label>
+          <input type="checkbox" id="markdown" name="markdown" checked><br>
+        
+
+          <button id="open-button">Open Edited File</button>
+        </div>
+        
     </div>
 
     <script>
@@ -345,8 +377,8 @@ const post = "Ci8qIHBvd2VyZWQgYnkgaHR0cHM6Ly9jaGF0Lm9wZW5haS5jb20vICovCgogICAgZn
                 editor.value = chatGPTdata;
                 //editor.style.display = 'block';
                 document.getElementById('status').style.display = 'none';
-                document.getElementById('download-button').style.display = 'block';
-                document.getElementById('open-button').style.display = 'block';
+                document.getElementById('controlPanelAfterUpload').style.display = 'block';
+                //document.getElementById('open-button').style.display = 'block';
             };
             
             reader.readAsText(file);
@@ -374,8 +406,8 @@ const post = "Ci8qIHBvd2VyZWQgYnkgaHR0cHM6Ly9jaGF0Lm9wZW5haS5jb20vICovCgogICAgZn
                 editor.value = chatGPTdata;
                 //editor.style.display = 'block';
                 document.getElementById('status').style.display = 'none';
-                document.getElementById('download-button').style.display = 'block';
-                document.getElementById('open-button').style.display = 'block';
+                document.getElementById('controlPanelAfterUpload').style.display = 'block';
+                //document.getElementById('open-button').style.display = 'block';
             };
             
             reader.readAsText(file);
