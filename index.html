@@ -388,7 +388,7 @@ const post = "Ci8qIHBvd2VyZWQgYnkgaHR0cHM6Ly9jaGF0Lm9wZW5haS5jb20vICovCgogICAgZn
             event.preventDefault();
             const fileInput = document.getElementById('file-input');
             const file = fileInput.files[0];
-            if (file.size > 200 * 1024 * 1024) { // Check if file is larger than 200MB
+            if (file.size > 400 * 1024 * 1024) { // Check if file is larger than 400MB
                 alert('File is too large to handle in the browser');
                 return;
             }
