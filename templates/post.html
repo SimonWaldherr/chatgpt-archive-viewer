@@ -1,0 +1,395 @@
+
+/* 
+ * Enhanced ChatGPT Archive Viewer
+ * Powered by https://chat.openai.com/
+ * Enhanced by https://simonwaldherr.github.io/chatgpt-archive-viewer/
+ */
+
+// Enhanced conversation message parser
+function getConversationMessages(conversation) {
+    const messages = [];
+    let currentNode = conversation.current_node;
+    
+    while (currentNode != null) {
+        const node = conversation.mapping[currentNode];
+        if (
+            node.message &&
+            node.message.content &&
+            node.message.content.content_type === "text" &&
+            node.message.content.parts.length > 0 &&
+            node.message.content.parts[0].length > 0 &&
+            (node.message.author.role !== "system" || node.message.metadata?.is_user_system_message)
+        ) {
+            let author = node.message.author.role;
+            if (author === "assistant") {
+                author = "ChatGPT";
+            } else if (author === "system" && node.message.metadata?.is_user_system_message) {
+                author = "Custom user info";
+            }
+            
+            messages.push({ 
+                author, 
+                text: node.message.content.parts[0], 
+                date: new Date(node.message.create_time * 1000),
+                messageId: node.message.id
+            });
+        }
+        currentNode = node.parent;
+    }
+    return messages.reverse();
+}
+
+// Enhanced dark mode support
+function applyDarkModePreference() {
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    if (prefersDark) {
+        document.body.classList.add('dark-mode');
+    }
+
+    // Listen for changes in color scheme preference
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+            if (e.matches) {
+                document.body.classList.add('dark-mode');
+            } else {
+                document.body.classList.remove('dark-mode');
+            }
+        });
+    }
+}
+
+// Utility function to format dates
+function formatDate(date) {
+    return date.toISOString().replace("T", " ").substr(0, 19);
+}
+
+// Utility function to escape HTML with proper UTF-8 handling
+function escapeHtml(text) {
+    if (typeof text !== 'string') {
+        text = String(text);
+    }
+    
+    // Fix common encoding issues
+    text = text
+        .replace(/â€™/g, "'")     // Fix curly apostrophe
+        .replace(/â€œ/g, '"')     // Fix opening quote
+        .replace(/â€/g, '"')      // Fix closing quote
+        .replace(/â€"/g, '—')     // Fix em dash
+        .replace(/â€"/g, '–')     // Fix en dash
+        .replace(/â€¦/g, '…')     // Fix ellipsis
+        .replace(/Â/g, '')        // Remove extra non-breaking space markers
+        .replace(/â¢/g, '•');     // Fix bullet point
+    
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Format date for message headers (shorter format)
+function formatDateShort(date) {
+    if (!date) return '';
+    const options = { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    };
+    return date.toLocaleDateString('en-US', options);
+}
+
+// Enhanced main initialization function
+window.onload = function() {
+    try {
+        buildConversationList();
+        setupControlPanel();
+        applyDarkModePreference();
+        
+        // Initial state: collapse all conversations
+        document.querySelectorAll('.conversation').forEach(div => {
+            div.classList.add('collapsed');
+        });
+        
+        console.log('✅ ChatGPT Archive Enhanced loaded successfully');
+    } catch (error) {
+        console.error('❌ Error loading ChatGPT Archive:', error);
+    }
+};
+
+// Build the conversation list
+function buildConversationList() {
+    const root = document.getElementById("root");
+    if (!root) {
+        throw new Error('Root element not found');
+    }
+    
+    root.innerHTML = '';
+    
+    for (let i = 0; i < jsonData.length; i++) {
+        const conversation = jsonData[i];
+        const messages = getConversationMessages(conversation);
+        
+        if (messages.length === 0) continue;
+        
+        const conversationDiv = createConversationElement(conversation, messages);
+        root.appendChild(conversationDiv);
+    }
+}
+
+// Create a conversation element
+function createConversationElement(conversation, messages) {
+    const div = document.createElement("div");
+    div.className = "conversation";
+    
+    // Calculate stats
+    const messageCount = messages.length;
+    const totalLength = messages.reduce((sum, msg) => sum + msg.text.length, 0);
+    
+    // Get first and last message dates
+    const firstDate = messages.length > 0 ? messages[0].date : null;
+    const lastDate = messages.length > 0 ? messages[messages.length - 1].date : null;
+    
+    // Format dates for display
+    const formatDate = (date) => {
+        if (!date) return '';
+        const now = new Date();
+        const diffTime = Math.abs(now - date);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        if (diffDays === 1) return 'today';
+        if (diffDays === 2) return 'yesterday';
+        if (diffDays <= 7) return `${diffDays - 1} days ago`;
+        if (diffDays <= 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
+        if (diffDays <= 365) return `${Math.ceil(diffDays / 30)} months ago`;
+        return `${Math.ceil(diffDays / 365)} years ago`;
+    };
+    
+    // Build stats text
+    let statsText = `${messageCount} messages &#8226; ${Math.round(totalLength/1000)}k chars`;
+    if (firstDate && lastDate) {
+        const firstDateStr = formatDate(firstDate);
+        const lastDateStr = formatDate(lastDate);
+        if (firstDateStr === lastDateStr) {
+            statsText += ` &#8226; ${firstDateStr}`;
+        } else {
+            statsText += ` &#8226; ${firstDateStr} to ${lastDateStr}`;
+        }
+    }
+    
+    // Create header
+    const header = document.createElement("h4");
+    header.innerHTML = `
+        <a href="https://chat.openai.com/c/${conversation.conversation_id}/" 
+           target="_blank" 
+           rel="noopener noreferrer" 
+           title="Open in ChatGPT">&#128279;</a>
+        <span>${escapeHtml(conversation.title)}</span>
+        <span class="stats">${statsText}</span>
+    `;
+    
+    // Add click handler to header
+    header.addEventListener('click', function(e) {
+        if (e.target.tagName !== 'A') {
+            e.preventDefault();
+            this.parentElement.classList.toggle('collapsed');
+        }
+    });
+    
+    div.appendChild(header);
+    
+    // Add messages
+    messages.forEach(messageData => {
+        const messageElement = createMessageElement(messageData);
+        div.appendChild(messageElement);
+    });
+    
+    return div;
+}
+
+// Create a message element
+function createMessageElement(messageData) {
+    const messageDiv = document.createElement("div");
+    messageDiv.className = "message";
+    
+    // Add specific classes for styling
+    if (messageData.author === "ChatGPT") {
+        messageDiv.classList.add("chatgpt-message");
+    } else if (messageData.author === "user") {
+        messageDiv.classList.add("user-message");
+    }
+    
+    // Special styling for custom user info
+    if (messageData.author === "Custom user info") {
+        messageDiv.style.backgroundColor = "var(--button-bg)";
+        messageDiv.style.border = "2px dashed var(--conversation-border)";
+    }
+    
+    messageDiv.innerHTML = `
+        <div class="author">${escapeHtml(messageData.author)} (${formatDateShort(messageData.date)})</div>
+        <div>${escapeHtml(messageData.text)}</div>
+    `;
+    
+    return messageDiv;
+}
+
+// Setup the control panel
+function setupControlPanel() {
+    const controlPanel = document.createElement('div');
+    controlPanel.id = 'controlPanel';
+    
+    // Search input
+    const searchBox = document.createElement('input');
+    searchBox.type = 'text';
+    searchBox.placeholder = 'Search conversations... (use quotes, - for exclude, / for OR)';
+    searchBox.setAttribute('aria-label', 'Search conversations');
+    
+    // Buttons
+    const searchButton = createButton('&#128269; Search', () => performSearch(searchBox.value));
+    const expandAllButton = createButton('&#128214; Expand All', expandAllConversations);
+    const collapseAllButton = createButton('&#128218; Collapse All', collapseAllConversations);
+    const darkModeButton = createButton('&#127769; Toggle Dark Mode', toggleDarkMode);
+    
+    // Add elements to control panel
+    [searchBox, searchButton, expandAllButton, collapseAllButton, darkModeButton].forEach(element => {
+        controlPanel.appendChild(element);
+    });
+    
+    // Add to page
+    document.body.insertBefore(controlPanel, document.body.firstChild);
+    
+    // Setup search on Enter key
+    searchBox.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch(this.value);
+        }
+    });
+    
+    // Auto-search as user types (debounced)
+    let searchTimeout;
+    searchBox.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            if (this.value.length > 2 || this.value.length === 0) {
+                performSearch(this.value);
+            }
+        }, 300);
+    });
+}
+
+// Create a button element
+function createButton(text, onClick) {
+    const button = document.createElement('button');
+    button.innerHTML = text;
+    button.addEventListener('click', onClick);
+    return button;
+}
+// Expand all conversations
+function expandAllConversations() {
+    document.querySelectorAll('.conversation').forEach(div => {
+        div.classList.remove('collapsed');
+    });
+}
+
+// Collapse all conversations
+function collapseAllConversations() {
+    document.querySelectorAll('.conversation').forEach(div => {
+        div.classList.add('collapsed');
+    });
+}
+
+// Toggle dark mode
+function toggleDarkMode() {
+    document.body.classList.toggle('dark-mode');
+    
+    // Save preference to localStorage
+    const isDarkMode = document.body.classList.contains('dark-mode');
+    localStorage.setItem('darkMode', isDarkMode);
+}
+
+// Enhanced search functionality
+function performSearch(searchText) {
+    if (!searchText.trim()) {
+        // Show all conversations if search is empty
+        document.querySelectorAll('.conversation').forEach(div => {
+            div.style.display = '';
+        });
+        return;
+    }
+    
+    const searchTerms = parseSearchQuery(searchText.toLowerCase().trim());
+    
+    document.querySelectorAll('.conversation').forEach(div => {
+        const text = div.textContent.toLowerCase();
+        
+        const matchesInclude = searchTerms.include.length === 0 || 
+            searchTerms.include.every(term => text.includes(term));
+        
+        const matchesOr = searchTerms.or.length === 0 || 
+            searchTerms.or.some(group => group.some(term => text.includes(term)));
+        
+        const matchesExclude = searchTerms.exclude.every(term => !text.includes(term));
+        
+        if (matchesInclude && matchesOr && matchesExclude) {
+            div.style.display = '';
+            // Expand matching conversations for better visibility
+            div.classList.remove('collapsed');
+        } else {
+            div.style.display = 'none';
+        }
+    });
+}
+
+// Parse search query with advanced operators
+function parseSearchQuery(searchText) {
+    const include = [];
+    const exclude = [];
+    const or = [];
+    
+    // Regex to find quoted strings, exclude terms (-), OR terms (/), and normal terms
+    const regex = /"([^"]+)"|(\S+)/g;
+    let match;
+    
+    while ((match = regex.exec(searchText)) !== null) {
+        if (match[1]) {
+            // Quoted string
+            include.push(match[1]);
+        } else if (match[2].startsWith('-')) {
+            // Exclude term
+            exclude.push(match[2].slice(1));
+        } else if (match[2].includes('/')) {
+            // OR term
+            or.push(match[2].split('/'));
+        } else {
+            // Normal include term
+            include.push(match[2]);
+        }
+    }
+    
+    return { include, exclude, or };
+}
+
+// Load dark mode preference
+function loadDarkModePreference() {
+    const savedDarkMode = localStorage.getItem('darkMode');
+    if (savedDarkMode === 'true') {
+        document.body.classList.add('dark-mode');
+    }
+}
+
+// Initialize on page load
+loadDarkModePreference();
+
+/* Enhanced by https://simonwaldherr.github.io/chatgpt-archive-viewer/ */
+    </script>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>
+  </script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

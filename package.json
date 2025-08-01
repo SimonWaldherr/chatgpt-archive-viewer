@@ -1,0 +1,41 @@
+{
+  "name": "chatgpt-archive-viewer",
+  "version": "2.0.0",
+  "description": "Enhanced ChatGPT chat archive viewer with search, dark mode, and enhanced UI",
+  "main": "index.html",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "npm run build && python3 -m http.server 8000",
+    "preview": "python3 -m http.server 8000",
+    "test": "node test.js && node test-utf8.js",
+    "test:utf8": "node test-utf8.js",
+    "lint": "eslint *.js",
+    "format": "prettier --write *.js *.html *.md"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SimonWaldherr/chatgpt-archive-viewer.git"
+  },
+  "keywords": [
+    "chatgpt",
+    "archive",
+    "viewer",
+    "chat",
+    "export",
+    "search",
+    "dark-mode"
+  ],
+  "author": "Simon Waldherr",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/SimonWaldherr/chatgpt-archive-viewer/issues"
+  },
+  "homepage": "https://simonwaldherr.github.io/chatgpt-archive-viewer/",
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
