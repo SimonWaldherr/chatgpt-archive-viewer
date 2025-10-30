@@ -365,8 +365,8 @@
 
         // File input event handlers
         function handleFileSelection(file) {
-            if (file.size > 400 * 1024 * 1024) { // 400MB limit
-                alert('File is too large to handle in the browser (max 400MB)');
+            if (file.size > 800 * 1024 * 1024) { // 800MB limit
+                alert('File is too large to handle in the browser (max 800MB)');
                 return;
             }
 
