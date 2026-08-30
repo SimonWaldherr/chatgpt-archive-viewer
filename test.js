@@ -28,7 +28,7 @@ function testTemplateExtraction() {
     const preContent = fs.readFileSync(preFile, 'utf8');
     const postContent = fs.readFileSync(postFile, 'utf8');
     
-    if (!preContent.includes('<!DOCTYPE html>')) {
+    if (!/<!doctype html>/i.test(preContent)) {
         throw new Error('Pre template does not contain valid HTML');
     }
     
@@ -52,7 +52,7 @@ function testConstantGeneration() {
     const preDecoded = Buffer.from(constants.pre, 'base64').toString('utf8');
     const postDecoded = Buffer.from(constants.post, 'base64').toString('utf8');
     
-    if (!preDecoded.includes('<!DOCTYPE html>')) {
+    if (!/<!doctype html>/i.test(preDecoded)) {
         throw new Error('Pre constant decoding failed');
     }
     
@@ -61,6 +61,36 @@ function testConstantGeneration() {
     }
     
     console.log('✅ Constant generation test passed');
+}
+
+function testGeneratedDocument() {
+    console.log('🧪 Testing generated viewer structure...');
+    const constants = generateConstants();
+    const pre = Buffer.from(constants.pre, 'base64').toString('utf8');
+    const post = Buffer.from(constants.post, 'base64').toString('utf8');
+    const output = `${pre}\nconst jsonData = [];\n${post}`;
+
+    if ((output.match(/<!doctype html>/gi) || []).length !== 1) {
+        throw new Error('Generated viewer must contain exactly one document declaration');
+    }
+    if ((output.match(/<\/html>/gi) || []).length !== 1) {
+        throw new Error('Generated viewer must contain exactly one closing html tag');
+    }
+    if (!output.includes('window.addEventListener(\'DOMContentLoaded\', init)')) {
+        throw new Error('Generated viewer initialization is missing');
+    }
+    if (!output.includes('chatgpt.com/c/')) {
+        throw new Error('Generated viewer uses an outdated conversation URL');
+    }
+
+    const script = output.match(/<script>([\s\S]*)<\/script>/);
+    if (!script) {
+        throw new Error('Generated viewer script is missing');
+    }
+    // Compile without executing so syntax errors in the embedded viewer fail CI.
+    new Function(script[1]);
+
+    console.log('✅ Generated viewer structure test passed');
 }
 
 function testBuild() {
@@ -106,6 +136,7 @@ function runTests() {
         
         testTemplateExtraction();
         testConstantGeneration();
+        testGeneratedDocument();
         testBuild();
         
         console.log('\n🎉 All tests passed!');

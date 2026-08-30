@@ -1,21 +1,23 @@
-# ChatGPT Archive Enhancer Tool
+# ChatGPT Archive Viewer
 
-The Chat Archive Enhancer Tool enhances your downloaded ChatGPT chat archive with the following features:
+Turn a ChatGPT data export into a private, searchable, portable HTML archive. All processing happens locally in the browser; no conversation data is uploaded.
 
 ## ✨ Features
 
-- **🔍 Advanced Search**: Easily search through your chat history with powerful operators:
+- **Current export support**: Open `conversations.json` as well as legacy `chat.html` exports
+- **🔍 Advanced Search**: Search titles and messages with useful operators:
   - Use quotes for exact phrases: `"exact phrase"`
   - Use `-` to exclude terms: `javascript -error`
   - Use `/` for OR searches: `python/javascript`
   - Combine all operators: `"machine learning" python -error`
 - **🌙 Dark Mode**: Automatic dark mode detection with manual toggle
-- **📚 Collapsible Chats**: Organize your chats by collapsing or expanding entries
-- **🔗 Direct Links**: Quick access to each chat on chat.openai.com
+- **📚 Fast browsing**: Conversations are sorted, collapsed, and rendered lazily for large archives
+- **🔗 Direct Links**: Quick access to each conversation on chatgpt.com
 - **💾 Settings Persistence**: Dark mode preference saved locally
 - **📱 Responsive Design**: Works great on mobile and desktop
 - **⚡ Performance**: Optimized for large chat archives
-- **🎨 Modern UI**: Clean, accessible interface with CSS custom properties
+- **⌨️ Accessible controls**: Responsive layout, keyboard search (`/`) and reduced-motion support
+- **🧳 Portable output**: The generated viewer is one self-contained file with no external dependencies
 
 ## 🚀 How to Use
 
@@ -28,7 +30,7 @@ The Chat Archive Enhancer Tool enhances your downloaded ChatGPT chat archive wit
 
 2. **Open Your Chat Archive**:
    - Visit the [Chat Archive Enhancer Tool](https://simonwaldherr.github.io/chatgpt-archive-viewer/)
-   - Click on the `choose file` button and select your `chat.html` file
+   - Choose `conversations.json` (recommended) or a legacy `chat.html` file
 
 3. **Save or Open Enhanced Archive**:
    - Click on `Save Edited File` to save the enhanced archive to your device

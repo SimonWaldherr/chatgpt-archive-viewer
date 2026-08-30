@@ -57,7 +57,7 @@ function testUTF8Encoding() {
     }
     
     // Check for UTF-8 meta tags
-    if (!preContent.includes('charset="UTF-8"') && !preContent.includes('charset=UTF-8')) {
+    if (!/charset=["']?utf-8/i.test(preContent)) {
         throw new Error('Pre template missing UTF-8 charset declaration');
     }
     
