@@ -5,6 +5,7 @@
   "main": "index.html",
   "scripts": {
     "build": "node build.js",
+    "build:example": "node build.js --example",
     "dev": "npm run build && python3 -m http.server 8000",
     "preview": "python3 -m http.server 8000",
     "test": "node test.js && node test-utf8.js",

@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const { build, generateConstants } = require('./build.js');
 
 /**
@@ -89,6 +90,86 @@ function testGeneratedDocument() {
     }
     // Compile without executing so syntax errors in the embedded viewer fail CI.
     new Function(script[1]);
+
+    const context = {
+        window: { addEventListener() {}, __archiveViewerOptions: { markdown: true } },
+        Intl,
+        Date,
+        console
+    };
+    vm.createContext(context);
+    vm.runInContext(`${script[1]}; globalThis.__viewerTest = { renderText, cleanExportArtifacts, normalizeSearchText, parseSearchQuery, evaluateSearch, sortedItems, setSort(value) { state.sort = value; } };`, context);
+    const markdown = [
+        '### ⭐ What is this?',
+        '',
+        '**Important** explanation. \uE200cite\uE202turn0search4\uE201',
+        '',
+        '- First item',
+        '- Second item',
+        '',
+        '---',
+        '',
+        '| Name | Value |',
+        '| --- | --- |',
+        '| One | Two |'
+    ].join('\n');
+    const rendered = context.__viewerTest.renderText(markdown);
+    if (!rendered.includes('<h4>⭐ What is this?</h4>') ||
+        !rendered.includes('<strong>Important</strong>') ||
+        !rendered.includes('<ul><li>First item</li><li>Second item</li></ul>') ||
+        !rendered.includes('<hr>') ||
+        !rendered.includes('<table>')) {
+        throw new Error('Markdown blocks are not rendered correctly');
+    }
+    if (rendered.includes('turn0search4') || rendered.includes('\uE200cite')) {
+        throw new Error('Internal citation markers are not removed');
+    }
+
+    const first = {
+        id: 'first',
+        title: 'Bayern Domain',
+        titleSearch: 'bayern domain',
+        created: new Date(2025, 1, 1),
+        updated: new Date(2026, 0, 30),
+        authors: new Set(['user', 'chatgpt']),
+        models: new Set(['gpt-4o']),
+        features: new Set(['code']),
+        isArchived: false,
+        messages: [{}, {}],
+        searchText: 'bayern domain user registration chatgpt answer uber cafe'
+    };
+    const second = {
+        id: 'second',
+        title: 'Older update',
+        titleSearch: 'older update',
+        created: new Date(2026, 0, 1),
+        updated: new Date(2025, 5, 1),
+        authors: new Set(['user']),
+        models: new Set(['gpt-3.5']),
+        features: new Set(),
+        isArchived: true,
+        messages: [{}],
+        searchText: 'unrelated conversation'
+    };
+    const terms = context.__viewerTest.parseSearchQuery('title:"bayern domain" from:assistant created:2025 updated:2026-01 after:2026 before:2026-02-01');
+    if (!context.__viewerTest.evaluateSearch(first, terms).matches || context.__viewerTest.evaluateSearch(second, terms).matches) {
+        throw new Error('Structured search filters are not evaluated correctly');
+    }
+    const advancedTerms = context.__viewerTest.parseSearchQuery('Café OR Bayern model:gpt-4 has:code messages:>=2 is:active');
+    if (!context.__viewerTest.evaluateSearch(first, advancedTerms).matches || advancedTerms.alternatives.length !== 1) {
+        throw new Error('Model, content, count, status, OR, or normalized text search is incorrect');
+    }
+    if (context.__viewerTest.normalizeSearchText('Über Café Straße') !== 'uber cafe strasse') {
+        throw new Error('Diacritic-insensitive search normalization is incorrect');
+    }
+    context.__viewerTest.setSort('created-desc');
+    if (context.__viewerTest.sortedItems([first, second])[0].id !== 'second') {
+        throw new Error('Creation-date sorting is incorrect');
+    }
+    context.__viewerTest.setSort('updated-desc');
+    if (context.__viewerTest.sortedItems([first, second])[0].id !== 'first') {
+        throw new Error('Last-change sorting is incorrect');
+    }
 
     console.log('✅ Generated viewer structure test passed');
 }

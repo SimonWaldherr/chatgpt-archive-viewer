@@ -1,6 +1,14 @@
 
 const viewerOptions = window.__archiveViewerOptions || { markdown: true };
-const state = { conversations: [], query: '', sort: 'newest' };
+const state = { conversations: [], query: '', sort: 'updated-desc' };
+
+function normalizeSearchText(value) {
+    return String(value == null ? '' : value)
+        .toLocaleLowerCase()
+        .normalize('NFKD')
+        .replace(/\p{M}/gu, '')
+        .replace(/ß/g, 'ss');
+}
 
 function getTextParts(content) {
     if (!content) return [];
@@ -30,11 +38,24 @@ function getConversationMessages(conversation) {
         const role = message && message.author ? message.author.role : '';
         const isUserSystem = Boolean(message && message.metadata && message.metadata.is_user_system_message);
         if (message && parts.length && (role !== 'system' || isUserSystem)) {
+            const text = parts.join('\n\n');
+            const content = message.content || {};
+            const features = new Set();
+            if (content.content_type === 'code' || /```/.test(text)) features.add('code');
+            (Array.isArray(content.parts) ? content.parts : []).forEach(part => {
+                if (!part || typeof part !== 'object') return;
+                if (part.content_type === 'image_asset_pointer') features.add('image');
+                if (part.content_type === 'audio_asset_pointer') features.add('audio');
+                if (/asset_pointer$/.test(part.content_type || '')) features.add('attachment');
+            });
+            if (message.metadata && Array.isArray(message.metadata.attachments) && message.metadata.attachments.length) features.add('attachment');
             messages.push({
                 author: role === 'assistant' ? 'ChatGPT' : role === 'system' ? 'Custom instructions' : role || 'Unknown',
-                text: parts.join('\n\n'),
+                text,
                 date: message.create_time ? new Date(message.create_time * 1000) : null,
-                id: message.id || currentNode
+                id: message.id || currentNode,
+                model: (message.metadata && (message.metadata.model_slug || message.metadata.default_model_slug)) || '',
+                features
             });
         }
         currentNode = node.parent;
@@ -46,20 +67,133 @@ function escapeHtml(value) {
     return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
-function renderText(text) {
-    const safe = escapeHtml(text);
-    if (!viewerOptions.markdown) return safe;
-    const blocks = [];
-    let output = safe.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, language, code) => {
-        const token = `%%CODEBLOCK${blocks.length}%%`;
-        blocks.push(`<pre><code${language ? ` data-language="${language.trim()}"` : ''}>${code.replace(/^\n|\n$/g, '')}</code></pre>`);
+function cleanExportArtifacts(value) {
+    return String(value == null ? '' : value)
+        .replace(/\uE200(?:cite|filecite|navlist)\uE202[\s\S]*?\uE201/g, '')
+        .replace(/【\d+†[^】]*】/g, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .trim();
+}
+
+function renderInline(value) {
+    const codeSpans = [];
+    let output = escapeHtml(value).replace(/`([^`\n]+)`/g, (_, code) => {
+        const token = `%%CODESPAN${codeSpans.length}%%`;
+        codeSpans.push(`<code>${code}</code>`);
         return token;
     });
-    output = output.replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    output = output
         .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-    blocks.forEach((block, index) => { output = output.replace(`%%CODEBLOCK${index}%%`, block); });
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+        .replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+    codeSpans.forEach((code, index) => { output = output.replace(`%%CODESPAN${index}%%`, code); });
     return output;
+}
+
+function splitTableRow(line) {
+    return line.trim().replace(/^\||\|$/g, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));
+}
+
+function renderText(text) {
+    const cleaned = cleanExportArtifacts(text);
+    if (!viewerOptions.markdown) return escapeHtml(cleaned);
+
+    const lines = cleaned.replace(/\r\n?/g, '\n').split('\n');
+    const output = [];
+    let paragraph = [];
+    let listType = '';
+    let listItems = [];
+
+    const flushParagraph = () => {
+        if (!paragraph.length) return;
+        output.push(`<p>${paragraph.map(renderInline).join('<br>')}</p>`);
+        paragraph = [];
+    };
+    const flushList = () => {
+        if (!listItems.length) return;
+        output.push(`<${listType}>${listItems.map(item => `<li>${renderInline(item)}</li>`).join('')}</${listType}>`);
+        listType = '';
+        listItems = [];
+    };
+    const flushBlocks = () => { flushParagraph(); flushList(); };
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const trimmed = line.trim();
+
+        const fence = trimmed.match(/^```([\w.+-]*)\s*$/);
+        if (fence) {
+            flushBlocks();
+            const code = [];
+            index += 1;
+            while (index < lines.length && !/^```\s*$/.test(lines[index].trim())) {
+                code.push(lines[index]);
+                index += 1;
+            }
+            const language = fence[1] ? ` data-language="${escapeHtml(fence[1])}"` : '';
+            output.push(`<pre><code${language}>${escapeHtml(code.join('\n'))}</code></pre>`);
+            continue;
+        }
+
+        if (!trimmed) { flushBlocks(); continue; }
+
+        const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+            flushBlocks();
+            const level = Math.min(4, heading[1].length + 2);
+            output.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+            continue;
+        }
+
+        if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+            flushBlocks();
+            output.push('<hr>');
+            continue;
+        }
+
+        if (index + 1 < lines.length && line.includes('|') && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1])) {
+            flushBlocks();
+            const headers = splitTableRow(line);
+            index += 2;
+            const rows = [];
+            while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+                rows.push(splitTableRow(lines[index]));
+                index += 1;
+            }
+            index -= 1;
+            output.push(`<div class="table-wrap"><table><thead><tr>${headers.map(cell => `<th>${renderInline(cell)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${renderInline(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+            continue;
+        }
+
+        const unordered = line.match(/^\s*[-+*]\s+(.+)$/);
+        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (unordered || ordered) {
+            flushParagraph();
+            const nextType = unordered ? 'ul' : 'ol';
+            if (listType && listType !== nextType) flushList();
+            listType = nextType;
+            listItems.push((unordered || ordered)[1]);
+            continue;
+        }
+
+        const quote = line.match(/^\s*>\s?(.*)$/);
+        if (quote) {
+            flushBlocks();
+            const quoteLines = [quote[1]];
+            while (index + 1 < lines.length && /^\s*>/.test(lines[index + 1])) {
+                index += 1;
+                quoteLines.push(lines[index].replace(/^\s*>\s?/, ''));
+            }
+            output.push(`<blockquote>${quoteLines.map(renderInline).join('<br>')}</blockquote>`);
+            continue;
+        }
+
+        flushList();
+        paragraph.push(line);
+    }
+    flushBlocks();
+    return output.join('');
 }
 
 function formatDate(date, withTime = false) {
@@ -76,29 +210,135 @@ function normalizeConversation(conversation, index) {
         raw: conversation,
         id: conversation.conversation_id || conversation.id || `conversation-${index}`,
         title, created, updated, messages,
-        searchText: `${title}\n${messages.map(message => `${message.author} ${message.text}`).join('\n')}`.toLocaleLowerCase()
+        titleSearch: normalizeSearchText(title),
+        authors: new Set(messages.map(message => normalizeSearchText(message.author))),
+        models: new Set([...messages.map(message => normalizeSearchText(message.model)), normalizeSearchText(conversation.default_model_slug)].filter(Boolean)),
+        features: new Set(messages.flatMap(message => [...message.features])),
+        isArchived: Boolean(conversation.is_archived),
+        searchText: normalizeSearchText(`${title}\n${messages.map(message => `${message.author} ${message.text}`).join('\n')}`)
     };
 }
 
 function parseSearchQuery(input) {
     const include = [], exclude = [], alternatives = [];
-    const regex = /"([^"]+)"|(\S+)/g;
-    let match;
-    while ((match = regex.exec(input.toLocaleLowerCase())) !== null) {
-        const token = match[1] || match[2];
-        if (!match[1] && token.startsWith('-') && token.length > 1) exclude.push(token.slice(1));
-        else if (!match[1] && token.includes('/')) alternatives.push(token.split('/').filter(Boolean));
-        else include.push(token);
+    const filters = { title: [], from: [], after: [], before: [], created: [], updated: [], model: [], has: [], is: [], messages: [] };
+    const tokens = normalizeSearchText(input).match(/-?[a-z]+:"[^"]+"|"[^"]+"|\S+/g) || [];
+    for (let index = 0; index < tokens.length; index += 1) {
+        const rawToken = tokens[index];
+        const token = rawToken.replace(/^"|"$/g, '');
+        if (index + 2 < tokens.length && tokens[index + 1] === 'or' && !token.includes(':') && !token.startsWith('-')) {
+            const group = [token];
+            while (index + 2 < tokens.length && tokens[index + 1] === 'or') {
+                const alternative = tokens[index + 2].replace(/^"|"$/g, '');
+                if (alternative.includes(':') || alternative.startsWith('-')) break;
+                group.push(alternative);
+                index += 2;
+            }
+            if (group.length > 1) { alternatives.push(group); continue; }
+        }
+        if (token === 'or') continue;
+        const field = token.match(/^([a-z]+):(.+)$/);
+        if (field && Object.hasOwn(filters, field[1])) {
+            filters[field[1]].push(field[2].replace(/^"|"$/g, ''));
+        } else if (token.startsWith('-') && token.length > 1) {
+            exclude.push(token.slice(1));
+        } else if (token.includes('/')) {
+            alternatives.push(token.split('/').filter(Boolean));
+        } else {
+            include.push(token);
+        }
     }
-    return { include, exclude, alternatives };
+    return { include, exclude, alternatives, filters };
 }
 
-function matchesQuery(item, query) {
-    if (!query.trim()) return true;
-    const terms = parseSearchQuery(query);
-    return terms.include.every(term => item.searchText.includes(term))
+function dateRange(value) {
+    if (!/^\d{4}(?:-\d{2})?(?:-\d{2})?$/.test(value)) return null;
+    const parts = value.split('-').map(Number);
+    if (parts[1] && (parts[1] < 1 || parts[1] > 12)) return null;
+    const start = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+    if (parts[2] && (start.getFullYear() !== parts[0] || start.getMonth() !== parts[1] - 1 || start.getDate() !== parts[2])) return null;
+    let end;
+    if (parts.length === 1) end = new Date(parts[0] + 1, 0, 1);
+    else if (parts.length === 2) end = new Date(parts[0], parts[1], 1);
+    else end = new Date(parts[0], parts[1] - 1, parts[2] + 1);
+    return Number.isNaN(start.getTime()) ? null : { start, end };
+}
+
+function dateMatches(date, values) {
+    if (!values.length) return true;
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+    return values.every(value => {
+        const range = dateRange(value);
+        return range && date >= range.start && date < range.end;
+    });
+}
+
+function countOccurrences(text, term) {
+    if (!term) return 0;
+    let count = 0;
+    let position = 0;
+    while ((position = text.indexOf(term, position)) !== -1) {
+        count += 1;
+        position += Math.max(1, term.length);
+    }
+    return count;
+}
+
+function messageCountMatches(count, values) {
+    return values.every(value => {
+        const range = value.match(/^(\d+)\.\.(\d+)$/);
+        if (range) return count >= Number(range[1]) && count <= Number(range[2]);
+        const comparison = value.match(/^(<=|>=|<|>|=)?(\d+)$/);
+        if (!comparison) return false;
+        const expected = Number(comparison[2]);
+        if (comparison[1] === '<') return count < expected;
+        if (comparison[1] === '<=') return count <= expected;
+        if (comparison[1] === '>') return count > expected;
+        if (comparison[1] === '>=') return count >= expected;
+        return count === expected;
+    });
+}
+
+function evaluateSearch(item, terms) {
+    const filters = terms.filters;
+    const activityDate = item.updated || item.created;
+    const afterMatches = filters.after.every(value => {
+        const range = dateRange(value);
+        return range && activityDate && activityDate >= range.start;
+    });
+    const beforeMatches = filters.before.every(value => {
+        const range = dateRange(value);
+        return range && activityDate && activityDate < range.start;
+    });
+    const authorMatches = filters.from.every(author => {
+        const normalized = author === 'assistant' ? 'chatgpt' : author;
+        return item.authors.has(normalized);
+    });
+    const modelMatches = filters.model.every(model => [...item.models].some(value => value.includes(model)));
+    const featureMatches = filters.has.every(feature => item.features.has(feature));
+    const stateMatches = filters.is.every(value => {
+        if (value === 'archived') return item.isArchived;
+        if (value === 'active' || value === 'unarchived') return !item.isArchived;
+        return false;
+    });
+    const matches = terms.include.every(term => item.searchText.includes(term))
         && terms.exclude.every(term => !item.searchText.includes(term))
-        && terms.alternatives.every(group => group.some(term => item.searchText.includes(term)));
+        && terms.alternatives.every(group => group.some(term => item.searchText.includes(term)))
+        && filters.title.every(term => item.titleSearch.includes(term))
+        && authorMatches
+        && modelMatches
+        && featureMatches
+        && stateMatches
+        && messageCountMatches(item.messages.length, filters.messages)
+        && afterMatches
+        && beforeMatches
+        && dateMatches(item.created, filters.created)
+        && dateMatches(item.updated, filters.updated);
+    const positiveTerms = [...terms.include, ...terms.alternatives.flat(), ...filters.title];
+    return {
+        matches,
+        count: matches ? positiveTerms.reduce((sum, term) => sum + countOccurrences(item.searchText, term), 0) : 0
+    };
 }
 
 function createMessage(message) {
@@ -106,7 +346,7 @@ function createMessage(message) {
     const roleClass = message.author === 'user' ? 'user-message' : message.author === 'ChatGPT' ? 'assistant-message' : 'system-message';
     element.className = `message ${roleClass}`;
     const date = formatDate(message.date, true);
-    element.innerHTML = `<div class="message-head"><span class="author">${escapeHtml(message.author)}</span>${date ? `<time datetime="${message.date.toISOString()}">${escapeHtml(date)}</time>` : ''}</div><div class="message-body">${renderText(message.text)}</div>`;
+    element.innerHTML = `<div class="message-head"><span class="author">${escapeHtml(message.author)}</span>${date ? `<time datetime="${message.date.toISOString()}">${escapeHtml(date)}</time>` : ''}</div><div class="message-body${viewerOptions.markdown ? '' : ' plain-text'}">${renderText(message.text)}</div>`;
     return element;
 }
 
@@ -125,7 +365,7 @@ function ensureMessagesRendered(article, item) {
     container.dataset.rendered = 'true';
 }
 
-function createConversation(item) {
+function createConversation(item, matchCount = 0) {
     const article = document.createElement('article');
     article.className = 'conversation';
     article.dataset.id = item.id;
@@ -133,8 +373,9 @@ function createConversation(item) {
     button.className = 'conversation-header';
     button.type = 'button';
     button.setAttribute('aria-expanded', 'false');
+    const created = formatDate(item.created);
     const updated = formatDate(item.updated);
-    button.innerHTML = `<span class="chevron" aria-hidden="true">›</span><span class="title">${escapeHtml(item.title)}</span><span class="meta">${item.messages.length.toLocaleString()} messages${updated ? ` · ${escapeHtml(updated)}` : ''}</span>`;
+    button.innerHTML = `<span class="chevron" aria-hidden="true">›</span><span class="title">${escapeHtml(item.title)}</span><span class="meta"><span>${item.messages.length.toLocaleString()} messages</span>${created ? `<span>Created ${escapeHtml(created)}</span>` : ''}${updated ? `<span>Updated ${escapeHtml(updated)}</span>` : ''}${matchCount ? `<span class="match-count">${matchCount.toLocaleString()} ${matchCount === 1 ? 'match' : 'matches'}</span>` : ''}</span>`;
     const messages = document.createElement('div');
     messages.className = 'messages';
     article.append(button, messages);
@@ -148,20 +389,29 @@ function createConversation(item) {
 
 function sortedItems(items) {
     return [...items].sort((a, b) => {
-        if (state.sort === 'title') return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
-        const aTime = a.updated ? a.updated.getTime() : 0;
-        const bTime = b.updated ? b.updated.getTime() : 0;
-        return state.sort === 'oldest' ? aTime - bTime : bTime - aTime;
+        let comparison = 0;
+        if (state.sort.startsWith('title')) comparison = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+        else if (state.sort.startsWith('messages')) comparison = a.messages.length - b.messages.length;
+        else {
+            const field = state.sort.startsWith('created') ? 'created' : 'updated';
+            comparison = (a[field] ? a[field].getTime() : 0) - (b[field] ? b[field].getTime() : 0);
+        }
+        if (state.sort.endsWith('desc')) comparison *= -1;
+        return comparison || a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
     });
 }
 
 function renderConversations() {
     const root = document.getElementById('root');
-    const visible = sortedItems(state.conversations.filter(item => matchesQuery(item, state.query)));
+    const terms = parseSearchQuery(state.query);
+    const evaluated = state.conversations.map(item => ({ item, result: evaluateSearch(item, terms) }));
+    const visible = sortedItems(evaluated.filter(entry => entry.result.matches).map(entry => entry.item));
+    const counts = new Map(evaluated.map(entry => [entry.item.id, entry.result.count]));
+    const totalMatches = evaluated.filter(entry => entry.result.matches).reduce((sum, entry) => sum + entry.result.count, 0);
     const fragment = document.createDocumentFragment();
-    visible.forEach(item => fragment.appendChild(createConversation(item)));
+    visible.forEach(item => fragment.appendChild(createConversation(item, counts.get(item.id))));
     root.replaceChildren(fragment);
-    document.getElementById('resultCount').textContent = `${visible.length.toLocaleString()} of ${state.conversations.length.toLocaleString()} conversations`;
+    document.getElementById('resultCount').textContent = `${visible.length.toLocaleString()} of ${state.conversations.length.toLocaleString()} conversations${state.query.trim() && totalMatches ? ` · ${totalMatches.toLocaleString()} text matches` : ''}`;
     document.getElementById('emptyState').hidden = visible.length !== 0;
 }
 
@@ -187,7 +437,17 @@ function init() {
         timer = setTimeout(() => { state.query = search.value; renderConversations(); }, 160);
     });
     clear.addEventListener('click', () => { search.value = ''; clear.style.display = 'none'; state.query = ''; renderConversations(); search.focus(); });
-    document.getElementById('sort').addEventListener('change', event => { state.sort = event.target.value; renderConversations(); });
+    const sort = document.getElementById('sort');
+    const storedSort = localStorage.getItem('archive-viewer-sort');
+    if (storedSort && sort.querySelector(`option[value="${storedSort}"]`)) {
+        state.sort = storedSort;
+        sort.value = storedSort;
+    }
+    sort.addEventListener('change', event => {
+        state.sort = event.target.value;
+        localStorage.setItem('archive-viewer-sort', state.sort);
+        renderConversations();
+    });
     document.getElementById('expandAll').addEventListener('click', () => document.querySelectorAll('.conversation').forEach(article => {
         article.classList.add('is-open');
         const item = state.conversations.find(candidate => candidate.id === article.dataset.id);
@@ -226,17 +486,25 @@ window.addEventListener('DOMContentLoaded', init);
         <div class="toolbar" role="search">
             <div class="search-wrap">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-                <input id="search" type="search" placeholder='Search, "exact phrase", -exclude, this/or/that' autocomplete="off" aria-label="Search conversations">
+                <input id="search" type="search" placeholder='Search conversations and messages…' autocomplete="off" aria-label="Search conversations">
                 <button id="clearSearch" type="button" aria-label="Clear search">×</button>
             </div>
             <div class="controls">
-                <select id="sort" class="control" aria-label="Sort conversations"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title A–Z</option></select>
+                <select id="sort" class="control" aria-label="Sort conversations">
+                    <optgroup label="Last changed"><option value="updated-desc">Newest first</option><option value="updated-asc">Oldest first</option></optgroup>
+                    <optgroup label="Created"><option value="created-desc">Newest first</option><option value="created-asc">Oldest first</option></optgroup>
+                    <optgroup label="Title"><option value="title-asc">A–Z</option><option value="title-desc">Z–A</option></optgroup>
+                    <optgroup label="Message count"><option value="messages-desc">Most first</option><option value="messages-asc">Fewest first</option></optgroup>
+                </select>
                 <button id="expandAll" class="control" type="button">Expand <span class="optional">all</span></button>
                 <button id="collapseAll" class="control" type="button">Collapse <span class="optional">all</span></button>
             </div>
             <button id="themeButton" class="control icon-control" type="button" aria-label="Toggle theme">◐</button>
         </div>
-        <div id="resultCount" class="result-line" aria-live="polite"></div>
+        <div class="toolbar-footer">
+            <div id="resultCount" class="result-line" aria-live="polite"></div>
+            <details class="search-help"><summary>Search tips</summary><div><code>"exact phrase"</code> <code>-exclude</code> <code>one OR two</code> <code>title:project</code> <code>from:user</code> <code>model:gpt-4o</code> <code>has:code</code> <code>messages:&gt;20</code> <code>is:archived</code> <code>after:2025-01-01</code> <code>created:2025</code></div></details>
+        </div>
     </div>
     <main><div id="root"></div><div id="emptyState" class="empty" hidden>No conversations match your search.</div></main>
 </body>

@@ -9,7 +9,16 @@ Turn a ChatGPT data export into a private, searchable, portable HTML archive. Al
   - Use quotes for exact phrases: `"exact phrase"`
   - Use `-` to exclude terms: `javascript -error`
   - Use `/` for OR searches: `python/javascript`
+  - Or use the readable form: `python OR javascript`
+  - Limit by title or author: `title:project from:user`
+  - Filter models and content: `model:gpt-4o has:code`
+  - Filter status and size: `is:archived messages:>50`
+  - Filter activity dates: `after:2025-01-01 before:2026-01-01`
+  - Filter creation or update periods: `created:2025 updated:2026-01`
   - Combine all operators: `"machine learning" python -error`
+  - Search ignores case and diacritics, so `cafe` also finds `Café`
+- **Search reference**: See [docs/search.md](docs/search.md) for every operator, date semantics, and examples
+- **↕️ Flexible sorting**: Sort independently by creation date, last change, title, or message count
 - **🌙 Dark Mode**: Automatic dark mode detection with manual toggle
 - **📚 Fast browsing**: Conversations are sorted, collapsed, and rendered lazily for large archives
 - **🔗 Direct Links**: Quick access to each conversation on chatgpt.com
@@ -33,8 +42,8 @@ Turn a ChatGPT data export into a private, searchable, portable HTML archive. Al
    - Choose `conversations.json` (recommended) or a legacy `chat.html` file
 
 3. **Save or Open Enhanced Archive**:
-   - Click on `Save Edited File` to save the enhanced archive to your device
-   - Or click on `Open Edited File` to directly use the enhanced archive
+   - Click `Save viewer` to download the enhanced archive
+   - Or click `Preview` to inspect it directly in the browser
 
 ### Option 2: Local Development
 
@@ -79,6 +88,7 @@ The project uses a modern build system that automatically generates the embedded
 
 ```bash
 npm run build    # Build the project
+npm run build:example # Build the project and regenerate example/chat-enhanced.html
 npm run dev      # Build and start development server
 npm run preview  # Start preview server
 npm test         # Run tests
@@ -90,8 +100,8 @@ npm run format   # Format code with Prettier
 
 The tool works by:
 
-1. Reading the original ChatGPT export HTML file
-2. Extracting the JSON data containing conversations
+1. Reading `conversations.json` or extracting conversation data from a legacy HTML export
+2. Validating and normalizing the conversation data locally
 3. Injecting enhanced HTML templates with modern JavaScript
 4. Creating an improved interface with search and UI enhancements
 

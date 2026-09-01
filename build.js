@@ -11,6 +11,8 @@ const path = require('path');
 // Template file paths
 const templateDir = path.join(__dirname, 'templates');
 const outputFile = path.join(__dirname, 'index.html');
+const exampleSourceFile = path.join(__dirname, 'example', 'chat-original.html');
+const exampleOutputFile = path.join(__dirname, 'example', 'chat-enhanced.html');
 
 // Read template parts
 function readTemplate(filename) {
@@ -42,6 +44,41 @@ function generateConstants() {
         pre: preBase64,
         post: postBase64
     };
+}
+
+function extractJsonData(source) {
+    const assignment = /(?:const|let|var)\s+jsonData\s*=\s*/g.exec(source);
+    if (!assignment) {
+        throw new Error('No jsonData assignment found in example archive');
+    }
+    const start = source.indexOf('[', assignment.index + assignment[0].length);
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+        const character = source[index];
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') quoted = false;
+            continue;
+        }
+        if (character === '"') quoted = true;
+        else if (character === '[') depth += 1;
+        else if (character === ']' && --depth === 0) return JSON.parse(source.slice(start, index + 1));
+    }
+    throw new Error('Incomplete jsonData array in example archive');
+}
+
+function buildExample() {
+    if (!fs.existsSync(exampleSourceFile)) return;
+    const conversations = extractJsonData(fs.readFileSync(exampleSourceFile, 'utf8'));
+    const preTemplate = readTemplate('pre.html');
+    const postTemplate = readTemplate('post.html');
+    const json = JSON.stringify(conversations).replace(/<\/script/gi, '<\\/script');
+    const output = `${preTemplate}\nwindow.__archiveViewerOptions = {"markdown":true};\nconst jsonData = ${json};\n${postTemplate}`;
+    fs.writeFileSync(exampleOutputFile, output, 'utf8');
+    console.log(`   - Example viewer: ${conversations.length} conversations`);
 }
 
 // Update index.html with new constants
@@ -76,6 +113,7 @@ function build() {
         
         const constants = generateConstants();
         updateIndexHtml(constants);
+        if (process.argv.includes('--example')) buildExample();
         
         console.log('✅ Build completed successfully!');
         console.log(`   - Pre template: ${constants.pre.length} chars (base64)`);
@@ -92,4 +130,4 @@ if (require.main === module) {
     build();
 }
 
-module.exports = { build, generateConstants };
+module.exports = { build, buildExample, extractJsonData, generateConstants };
